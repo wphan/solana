@@ -48,6 +48,7 @@ use {
         account_utils::StateMut,
         bpf_loader, bpf_loader_deprecated,
         bpf_loader_upgradeable::{self, UpgradeableLoaderState},
+        compute_budget::ComputeBudgetInstruction,
         feature_set::FeatureSet,
         instruction::{Instruction, InstructionError},
         loader_instruction,
@@ -2213,7 +2214,15 @@ fn do_process_program_write_and_deploy(
         } else {
             loader_instruction::write(buffer_pubkey, loader_id, offset, bytes)
         };
-        Message::new_with_blockhash(&[instruction], Some(&fee_payer_signer.pubkey()), &blockhash)
+        Message::new_with_blockhash(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(5000u32),
+                ComputeBudgetInstruction::set_compute_unit_price(100000u64),
+                instruction,
+            ],
+            Some(&fee_payer_signer.pubkey()),
+            &blockhash,
+        )
     };
 
     let mut write_messages = vec![];
@@ -2225,23 +2234,30 @@ fn do_process_program_write_and_deploy(
     // Create and add final message
     let final_message = if let Some(program_signers) = program_signers {
         let message = if loader_id == &bpf_loader_upgradeable::id() {
-            Message::new_with_blockhash(
-                &bpf_loader_upgradeable::deploy_with_max_program_len(
-                    &fee_payer_signer.pubkey(),
-                    &program_signers[0].pubkey(),
-                    buffer_pubkey,
-                    &program_signers[1].pubkey(),
-                    rpc_client.get_minimum_balance_for_rent_exemption(
-                        UpgradeableLoaderState::size_of_program(),
-                    )?,
-                    program_data_max_len,
+            let ixs = vec![
+                ComputeBudgetInstruction::set_compute_unit_limit(5000u32),
+                ComputeBudgetInstruction::set_compute_unit_price(100000u64),
+            ]
+            .into_iter()
+            .chain(bpf_loader_upgradeable::deploy_with_max_program_len(
+                &fee_payer_signer.pubkey(),
+                &program_signers[0].pubkey(),
+                buffer_pubkey,
+                &program_signers[1].pubkey(),
+                rpc_client.get_minimum_balance_for_rent_exemption(
+                    UpgradeableLoaderState::size_of_program(),
                 )?,
-                Some(&fee_payer_signer.pubkey()),
-                &blockhash,
-            )
+                program_data_max_len,
+            )?)
+            .collect::<Vec<Instruction>>();
+            Message::new_with_blockhash(&ixs, Some(&fee_payer_signer.pubkey()), &blockhash)
         } else {
             Message::new_with_blockhash(
-                &[loader_instruction::finalize(buffer_pubkey, loader_id)],
+                &[
+                    ComputeBudgetInstruction::set_compute_unit_limit(5000u32),
+                    ComputeBudgetInstruction::set_compute_unit_price(100000u64),
+                    loader_instruction::finalize(buffer_pubkey, loader_id),
+                ],
                 Some(&fee_payer_signer.pubkey()),
                 &blockhash,
             )
@@ -2449,7 +2465,10 @@ fn complete_partial_program_init(
     minimum_balance: u64,
     allow_excessive_balance: bool,
 ) -> Result<(Vec<Instruction>, u64), Box<dyn std::error::Error>> {
-    let mut instructions: Vec<Instruction> = vec![];
+    let mut instructions: Vec<Instruction> = vec![
+        ComputeBudgetInstruction::set_compute_unit_limit(5000u32),
+        ComputeBudgetInstruction::set_compute_unit_price(100000u64),
+    ];
     let mut balance_needed = 0;
     if is_account_executable(account) {
         return Err("Buffer account is already executable".into());
@@ -2595,7 +2614,7 @@ fn send_deploy_messages(
                         write_messages,
                         &[fee_payer_signer, write_signer],
                         SendAndConfirmConfig {
-                            resign_txs_count: Some(5),
+                            resign_txs_count: Some(500),
                             with_spinner: true,
                         },
                     )
