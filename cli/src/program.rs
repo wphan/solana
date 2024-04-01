@@ -48,6 +48,7 @@ use {
         account_utils::StateMut,
         bpf_loader, bpf_loader_deprecated,
         bpf_loader_upgradeable::{self, UpgradeableLoaderState},
+        compute_budget::ComputeBudgetInstruction,
         feature_set::FeatureSet,
         instruction::{Instruction, InstructionError},
         loader_instruction,
@@ -2449,7 +2450,10 @@ fn complete_partial_program_init(
     minimum_balance: u64,
     allow_excessive_balance: bool,
 ) -> Result<(Vec<Instruction>, u64), Box<dyn std::error::Error>> {
-    let mut instructions: Vec<Instruction> = vec![];
+    let mut instructions: Vec<Instruction> = vec![
+        ComputeBudgetInstruction::set_compute_unit_limit(5000u32),
+        ComputeBudgetInstruction::set_compute_unit_price(100000u64),
+    ];
     let mut balance_needed = 0;
     if is_account_executable(account) {
         return Err("Buffer account is already executable".into());
